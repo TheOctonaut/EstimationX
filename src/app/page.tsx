@@ -33,6 +33,7 @@ export default function Home() {
       router.push(`/room/${data.roomId}`);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
       setBusy(false);
     }
   }
