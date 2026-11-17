@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { isCardValue, summarize, type Summary } from "./scoring";
-import { getStore } from "./store";
+import { isCardValue, summarize, type Summary } from "./scoring.ts";
+import { getStore } from "./store.ts";
 
 export const MAX_PARTICIPANTS = 20;
 /** Participants are considered present if they've sent a heartbeat this recently. */
@@ -8,7 +8,7 @@ export const ACTIVE_WINDOW_MS = 60_000;
 const ROOM_TTL_SECONDS = 60 * 60 * 24;
 const ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 
-export type Phase = "voting" | "revealed";
+export type Phase = "waiting" | "voting" | "revealed";
 
 interface StoredParticipant {
   name: string;
@@ -22,6 +22,7 @@ interface Room {
   phase: Phase;
   round: number;
   hostId: string;
+  voteEndsAt: number | null;
   participants: Map<string, StoredParticipant>;
   votes: Map<string, string>;
 }
@@ -36,17 +37,21 @@ export interface PublicRoom {
   phase: Phase;
   round: number;
   hostId: string;
+  voteEndsAt: number | null;
   participants: { id: string; name: string; active: boolean; hasVoted: boolean; vote: string | null }[];
   summary: Summary | null;
   me: { id: string; name: string; vote: string | null; isHost: boolean; canManage: boolean } | null;
 }
 
 export class RoomError extends Error {
+  public status: number;
+
   constructor(
     message: string,
-    public status: number,
+    status: number,
   ) {
     super(message);
+    this.status = status;
   }
 }
 
@@ -82,9 +87,10 @@ async function load(roomId: string): Promise<Room> {
   }
   return {
     id: roomId,
-    phase: fields.phase === "revealed" ? "revealed" : "voting",
+    phase: fields.phase === "waiting" ? "waiting" : fields.phase === "revealed" ? "revealed" : "voting",
     round: Number(fields.round) || 1,
     hostId: fields.host,
+    voteEndsAt: fields.voteEndsAt ? Number(fields.voteEndsAt) : null,
     participants,
     votes,
   };
@@ -133,6 +139,7 @@ function toPublic(room: Room, meId: string | null): PublicRoom {
     phase: room.phase,
     round: room.round,
     hostId: room.hostId,
+    voteEndsAt: room.voteEndsAt,
     participants,
     summary: revealed ? summarize([...room.votes.values()]) : null,
     me:
@@ -161,7 +168,7 @@ export async function createRoom(name: unknown) {
   const roomId = randomId(8);
   const { id, token, participant } = newParticipant(cleaned);
   await save(roomId, {
-    phase: "voting",
+    phase: "waiting",
     round: "1",
     host: id,
     createdAt: String(Date.now()),
@@ -208,6 +215,7 @@ export async function vote(roomId: string, creds: Partial<Credentials> | null, v
   let room = await load(roomId);
   const id = requireParticipant(room, creds);
   if (round !== undefined && Number(round) !== room.round) throw new RoomError("That round has ended", 409);
+  if (room.phase === "waiting") throw new RoomError("Voting has not started yet", 409);
 
   if (value === null) {
     await getStore().remove(key(roomId), [`v:${id}`]);
@@ -228,10 +236,24 @@ export async function vote(roomId: string, creds: Partial<Credentials> | null, v
   return toPublic(room, id);
 }
 
+export async function startVoting(roomId: string, creds: Partial<Credentials> | null, duration: unknown = 45) {
+  const room = await load(roomId);
+  const id = requireParticipant(room, creds);
+  if (!canManage(room, id)) throw new RoomError("Only the host can start voting", 403);
+  if (room.phase !== "waiting") throw new RoomError("Voting has already started", 409);
+  if (typeof duration !== "number" || !Number.isInteger(duration) || duration < 1 || duration > 3600) {
+    throw new RoomError("Voting duration must be between 1 and 3600 seconds", 400);
+  }
+  const voteEndsAt = Date.now() + duration * 1000;
+  await save(roomId, { phase: "voting", voteEndsAt: String(voteEndsAt) });
+  return toPublic({ ...room, phase: "voting", voteEndsAt }, id);
+}
+
 export async function reveal(roomId: string, creds: Partial<Credentials> | null) {
   const room = await load(roomId);
   const id = requireParticipant(room, creds);
   if (!canManage(room, id)) throw new RoomError("Only the host can end voting", 403);
+  if (room.phase === "waiting") throw new RoomError("Voting has not started yet", 409);
   await save(roomId, { phase: "revealed" });
   room.phase = "revealed";
   return toPublic(room, id);
@@ -243,7 +265,7 @@ export async function reset(roomId: string, creds: Partial<Credentials> | null) 
   if (!canManage(room, id)) throw new RoomError("Only the host can reset the round", 403);
   await getStore().remove(key(roomId), [...room.votes.keys()].map((pid) => `v:${pid}`));
   const host = room.participants.get(room.hostId);
-  const fields: Record<string, string> = { phase: "voting", round: String(room.round + 1) };
+  const fields: Record<string, string> = { phase: "waiting", round: String(room.round + 1), voteEndsAt: "" };
   if (!host || !isActive(host)) fields.host = id;
   await save(roomId, fields);
   return getRoom(roomId, creds);

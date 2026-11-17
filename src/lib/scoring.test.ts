@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nearestFibonacci, summarize } from "./scoring.ts";
+import { isCardValue, nearestFibonacci, summarize } from "./scoring.ts";
 
 test("nearestFibonacci picks the closest card and rounds ties up", () => {
   assert.equal(nearestFibonacci(0.4), 0);
@@ -8,7 +8,12 @@ test("nearestFibonacci picks the closest card and rounds ties up", () => {
   assert.equal(nearestFibonacci(6.4), 5);
   assert.equal(nearestFibonacci(6.5), 8);
   assert.equal(nearestFibonacci(17), 21);
-  assert.equal(nearestFibonacci(200), 89);
+  assert.equal(nearestFibonacci(200), 21);
+});
+
+test("cards above 21 are not accepted", () => {
+  assert.equal(isCardValue("21"), true);
+  for (const card of ["34", "55", "89"]) assert.equal(isCardValue(card), false);
 });
 
 test("summarize ignores non-numeric cards in the average", () => {

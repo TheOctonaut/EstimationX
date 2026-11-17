@@ -3,11 +3,13 @@
 A simple planning poker app built with Next.js and deployed on Vercel.
 
 - Rooms for up to **20** active participants. Share the invite link to let people join.
-- Fibonacci deck: `0 1 2 3 5 8 13 21 34 55 89`, plus `?` and `☕`. These two don't count toward the average.
+- Fibonacci deck: `0 1 2 3 5 8 13 21`, plus `?` and `☕`. These two don't count toward the average.
+- The host clicks **Start voting** to unlock the cards and start a shared countdown, defaulting to **45 seconds** (adjustable from 1 to 3600 seconds).
+- Time running out only shows the host an inline reminder to end voting. It never forces a reveal or blocks input; **Keep voting** dismisses the reminder.
 - Voting ends automatically when every active participant has voted, or when the room host clicks **End voting & reveal**.
 - When voting ends, the app shows the **average** and the **closest Fibonacci card**. Ties round up.
 - Anyone can still change their vote after the reveal, and the results update live for everyone.
-- The host can click **Reset for next round** to start the next round.
+- The host can click **Reset for next round** to clear votes and return to waiting for **Start voting**.
 - If the host goes inactive, any participant can end voting or reset. A participant becomes inactive after about 60 seconds without a heartbeat.
 
 ## How it works

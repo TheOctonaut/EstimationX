@@ -20,6 +20,7 @@ export default function RoomClient() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [duration, setDuration] = useState("45");
   const creds = useRef<Credentials | null>(null);
   const pendingVote = useRef(false);
 
@@ -197,6 +198,7 @@ export default function RoomClient() {
     );
 
   const revealed = room.phase === "revealed";
+  const waiting = room.phase === "waiting";
   const active = room.participants.filter((p) => p.active);
   const votedCount = active.filter((p) => p.hasVoted).length;
   const me = room.me;
@@ -228,11 +230,24 @@ export default function RoomClient() {
         <p className="font-medium" data-testid="status">
           {revealed
             ? "Votes revealed — you can still change your vote while you discuss."
-            : `${votedCount} of ${active.length} voted`}
+            : waiting ? "Waiting for the host to start voting." : `${votedCount} of ${active.length} voted`}
         </p>
         {me?.canManage && (
-          <div className="flex gap-2">
-            {!revealed && (
+          <div className="flex flex-wrap items-center gap-2">
+            {waiting && (
+              <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => {
+                event.preventDefault();
+                act({ action: "start", duration: Number(duration) });
+              }}>
+                <label className="flex items-center gap-2 text-sm">
+                  Timer (seconds)
+                  <input className="input w-24" type="number" min="1" max="3600" step="1" required
+                    value={duration} onChange={(event) => setDuration(event.target.value)} />
+                </label>
+                <button className="btn-primary">Start voting</button>
+              </form>
+            )}
+            {!revealed && !waiting && (
               <button className="btn-primary" onClick={() => act({ action: "reveal" })}>
                 End voting &amp; reveal
               </button>
@@ -243,6 +258,11 @@ export default function RoomClient() {
           </div>
         )}
       </section>
+
+      {room.phase === "voting" && room.voteEndsAt !== null && (
+        <VotingTimer key={room.voteEndsAt} endsAt={room.voteEndsAt} isHost={me?.isHost ?? false}
+          onReveal={() => act({ action: "reveal" })} />
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -286,14 +306,15 @@ export default function RoomClient() {
       </section>
 
       <section className="mt-auto">
-        <p className="mb-2 text-sm text-zinc-500">{me?.vote ? "Your vote — tap again to clear" : "Pick a card"}</p>
+        <p className="mb-2 text-sm text-zinc-500">{waiting ? "Cards unlock when voting starts." : me?.vote ? "Your vote — tap again to clear" : "Pick a card"}</p>
         <div className="flex flex-wrap gap-2">
           {DECK.map((card) => (
             <button
               key={card}
+              disabled={waiting}
               onClick={() => castVote(card)}
               aria-pressed={me?.vote === card}
-              className={`h-20 w-14 rounded-xl border-2 text-xl font-bold transition ${
+              className={`h-20 w-14 rounded-xl border-2 text-xl font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${
                 me?.vote === card
                   ? "-translate-y-2 border-indigo-600 bg-indigo-600 text-white"
                   : "border-zinc-300 hover:-translate-y-1 hover:border-indigo-400 dark:border-zinc-700"
@@ -305,6 +326,30 @@ export default function RoomClient() {
         </div>
       </section>
     </main>
+  );
+}
+
+function VotingTimer({ endsAt, isHost, onReveal }: { endsAt: number; isHost: boolean; onReveal: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, []);
+  const remaining = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return (
+    <section className="panel flex flex-wrap items-center justify-between gap-3">
+      <p role="timer" aria-label="Voting time remaining" className="font-mono text-lg tabular-nums">
+        {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
+      </p>
+      {remaining === 0 && isHost && !dismissed && (
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="status">Time is up. End voting or give everyone more time.</p>
+          <button className="btn-primary" onClick={onReveal}>End voting &amp; reveal</button>
+          <button className="btn-secondary" onClick={() => setDismissed(true)}>Keep voting</button>
+        </div>
+      )}
+    </section>
   );
 }
 
