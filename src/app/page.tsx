@@ -3,11 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NAME_KEY, saveCredentials } from "@/lib/client";
+import { expectedPlanningPeriod } from "@/lib/planning-period";
 
 export default function Home() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [squad, setSquad] = useState("");
+  const [year, setYear] = useState("");
   const [quarter, setQuarter] = useState("");
   const [sprintNumber, setSprintNumber] = useState("");
   const [code, setCode] = useState("");
@@ -15,8 +17,12 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const expected = expectedPlanningPeriod();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate from localStorage after mount
     setName(localStorage.getItem(NAME_KEY) ?? "");
+    setYear(String(expected.year));
+    setQuarter(String(expected.quarter));
+    setSprintNumber(String(expected.sprintNumber));
   }, []);
 
   async function createRoom(event: React.FormEvent) {
@@ -28,7 +34,8 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name, squad, quarter, sprintNumber: sprintNumber === "" ? null : Number(sprintNumber),
+          name, squad, year: year === "" ? null : Number(year), quarter: quarter === "" ? null : Number(quarter),
+          sprintNumber: sprintNumber === "" ? null : Number(sprintNumber),
         }),
       });
       const data = await res.json();
@@ -76,10 +83,15 @@ export default function Home() {
             <input className="input w-full" placeholder="e.g. Platform" maxLength={50}
               value={squad} onChange={(event) => setSquad(event.target.value)} />
           </label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
+            <label className="flex min-w-0 flex-col gap-1 text-sm">
+              Year
+              <input className="input w-full" type="number" min="1000" max="9999" step="1"
+                value={year} onChange={(event) => setYear(event.target.value)} />
+            </label>
             <label className="flex min-w-0 flex-col gap-1 text-sm">
               Quarter
-              <input className="input w-full" placeholder="e.g. Q4 2026" maxLength={30}
+              <input className="input w-full" type="number" min="1" max="4" step="1"
                 value={quarter} onChange={(event) => setQuarter(event.target.value)} />
             </label>
             <label className="flex min-w-0 flex-col gap-1 text-sm">
@@ -88,6 +100,10 @@ export default function Home() {
                 value={sprintNumber} onChange={(event) => setSprintNumber(event.target.value)} />
             </label>
           </div>
+          <p className="text-xs text-zinc-500">
+            Suggested from today; all fields are optional and editable.
+            {" "}Sprint 1 starts on the first Wednesday of the quarter, then changes every two weeks.
+          </p>
         </fieldset>
         <button className="btn-primary" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create room"}

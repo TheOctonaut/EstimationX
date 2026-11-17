@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRoom, finalizeRound, getRoom, joinRoom, leave, nameVote, renameParticipant, reset, reveal, startVoting, vote } from "./rooms.ts";
+import { getStore } from "./store.ts";
 
 test("rounds wait for the host, use a shared 45-second default, and reset the timer", async () => {
   const host = await createRoom("Host");
@@ -230,14 +231,14 @@ test("renaming requires valid credentials and a non-empty name without adding a 
 });
 
 test("optional room details form a shared name and persist across rounds", async () => {
-  const host = await createRoom("Host", { squad: "  Platform   team ", quarter: "Q4 2026", sprintNumber: 12 });
+  const host = await createRoom("Host", { squad: "  Platform   team ", year: 2026, quarter: 4, sprintNumber: 3 });
   let room = await getRoom(host.roomId, null);
-  assert.equal(room.roomName, "Platform team · Q4 2026 · Sprint 12");
-  assert.deepEqual(room.details, { squad: "Platform team", quarter: "Q4 2026", sprintNumber: 12 });
+  assert.equal(room.roomName, "Platform team · 26Q4S3");
+  assert.deepEqual(room.details, { squad: "Platform team", year: 2026, quarter: 4, sprintNumber: 3 });
   const guest = await joinRoom(host.roomId, "Guest", null);
   assert.equal((await getRoom(host.roomId, guest)).roomName, room.roomName);
   room = await reset(host.roomId, host);
-  assert.equal(room.roomName, "Platform team · Q4 2026 · Sprint 12");
+  assert.equal(room.roomName, "Platform team · 26Q4S3");
   assert.equal(room.id, host.roomId);
   assert.equal(room.round, 2);
 });
@@ -246,10 +247,11 @@ test("room name fields can be omitted individually, including sprint zero", asyn
   const unnamed = await createRoom("Host");
   const room = await getRoom(unnamed.roomId, unnamed);
   assert.equal(room.roomName, "");
-  assert.deepEqual(room.details, { squad: "", quarter: "", sprintNumber: null });
+  assert.deepEqual(room.details, { squad: "", year: null, quarter: null, sprintNumber: null });
   for (const [details, expected] of [
     [{ squad: "Squad A" }, "Squad A"],
-    [{ quarter: "Q1" }, "Q1"],
+    [{ year: 2026 }, "2026"],
+    [{ quarter: 1 }, "Q1"],
     [{ sprintNumber: 0 }, "Sprint 0"],
   ] as const) {
     const host = await createRoom("Host", details);
@@ -263,5 +265,22 @@ test("invalid room details are rejected explicitly", async () => {
   }
   await assert.rejects(createRoom("Host", { squad: 123 }), /Squad must be text/);
   await assert.rejects(createRoom("Host", { squad: "a".repeat(51) }), /Squad must be at most 50/);
-  await assert.rejects(createRoom("Host", { quarter: "a".repeat(31) }), /Quarter must be at most 30/);
+  for (const quarter of [0, 5, 1.5, "Q4", "4"]) {
+    await assert.rejects(createRoom("Host", { quarter }), /Quarter must be a whole number from 1 to 4/);
+  }
+  for (const year of [26, 10000, 2026.5, "2026"]) {
+    await assert.rejects(createRoom("Host", { year }), /Year must be a four-digit whole number/);
+  }
+});
+
+test("existing text quarter room names remain readable", async () => {
+  const host = await createRoom("Host", { squad: "Platform", sprintNumber: 3 });
+  await getStore().set(`room:${host.roomId}`, { quarter: "Q4 2026" }, 86400);
+  let room = await getRoom(host.roomId, host);
+  assert.equal(room.details.year, 2026);
+  assert.equal(room.details.quarter, 4);
+  assert.equal(room.roomName, "Platform · 26Q4S3");
+  await getStore().set(`room:${host.roomId}`, { quarter: "FY26 Autumn" }, 86400);
+  room = await getRoom(host.roomId, host);
+  assert.equal(room.roomName, "Platform · FY26 Autumn · Sprint 3");
 });

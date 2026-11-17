@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { isCardValue, summarize, type Summary } from "./scoring.ts";
 import { getStore } from "./store.ts";
+import { formatPlanningPeriod, type PlanningPeriod } from "./planning-period.ts";
 
 export const MAX_PARTICIPANTS = 20;
 /** Participants are considered present if they've sent a heartbeat this recently. */
@@ -20,6 +21,7 @@ interface StoredParticipant {
 interface Room {
   id: string;
   details: RoomDetails;
+  legacyQuarter: string;
   phase: Phase;
   round: number;
   hostId: string;
@@ -37,10 +39,8 @@ export interface Credentials {
   token: string;
 }
 
-export interface RoomDetails {
+export interface RoomDetails extends PlanningPeriod {
   squad: string;
-  quarter: string;
-  sprintNumber: number | null;
 }
 
 export interface VoteHistoryEntry {
@@ -126,13 +126,17 @@ async function load(roomId: string): Promise<Room> {
     else if (field.startsWith(`i:${round}:`)) initialVotes.set(field.slice(`i:${round}:`.length), JSON.parse(value));
   }
   const finalized = history.some((entry) => entry.round === round && entry.winners !== undefined);
+  const legacyQuarter = fields.quarter?.match(/^Q([1-4])(?:\s+(\d{4}))?$/i);
+  const quarter = fields.quarter?.match(/^[1-4]$/) ? Number(fields.quarter) : legacyQuarter ? Number(legacyQuarter[1]) : null;
   return {
     id: roomId,
     details: {
       squad: fields.squad ?? "",
-      quarter: fields.quarter ?? "",
+      year: fields.year ? Number(fields.year) : legacyQuarter?.[2] ? Number(legacyQuarter[2]) : null,
+      quarter,
       sprintNumber: fields.sprintNumber ? Number(fields.sprintNumber) : null,
     },
+    legacyQuarter: fields.quarter && quarter === null ? fields.quarter : "",
     phase: finalized ? "revealed" : fields.phase === "waiting" ? "waiting" : fields.phase === "revealed" ? "revealed" : "voting",
     round,
     hostId: fields.host,
@@ -236,8 +240,9 @@ function toPublic(room: Room, meId: string | null): PublicRoom {
     id: room.id,
     roomName: [
       room.details.squad,
-      room.details.quarter,
-      room.details.sprintNumber === null ? "" : `Sprint ${room.details.sprintNumber}`,
+      ...(room.legacyQuarter
+        ? [room.legacyQuarter, room.details.sprintNumber === null ? "" : `Sprint ${room.details.sprintNumber}`]
+        : [formatPlanningPeriod(room.details)]),
     ].filter(Boolean).join(" · "),
     details: room.details,
     phase: room.phase,
@@ -274,10 +279,17 @@ function newParticipant(name: string) {
   return { id, token, participant };
 }
 
-export async function createRoom(name: unknown, details: { squad?: unknown; quarter?: unknown; sprintNumber?: unknown } = {}) {
+export async function createRoom(name: unknown, details: { squad?: unknown; year?: unknown; quarter?: unknown; sprintNumber?: unknown } = {}) {
   const cleaned = cleanName(name);
   const squad = cleanRoomText(details.squad, "Squad", 50);
-  const quarter = cleanRoomText(details.quarter, "Quarter", 30);
+  const year = details.year ?? null;
+  if (year !== null && (typeof year !== "number" || !Number.isInteger(year) || year < 1000 || year > 9999)) {
+    throw new RoomError("Year must be a four-digit whole number", 400);
+  }
+  const quarter = details.quarter ?? null;
+  if (quarter !== null && (typeof quarter !== "number" || !Number.isInteger(quarter) || quarter < 1 || quarter > 4)) {
+    throw new RoomError("Quarter must be a whole number from 1 to 4", 400);
+  }
   const sprintNumber = details.sprintNumber ?? null;
   if (sprintNumber !== null && (typeof sprintNumber !== "number" || !Number.isSafeInteger(sprintNumber) || sprintNumber < 0)) {
     throw new RoomError("Sprint Number must be a non-negative whole number", 400);
@@ -287,7 +299,8 @@ export async function createRoom(name: unknown, details: { squad?: unknown; quar
   await save(roomId, {
     phase: "waiting",
     squad,
-    quarter,
+    year: year === null ? "" : String(year),
+    quarter: quarter === null ? "" : String(quarter),
     sprintNumber: sprintNumber === null ? "" : String(sprintNumber),
     round: "1",
     host: id,
