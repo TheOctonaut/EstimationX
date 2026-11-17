@@ -285,7 +285,7 @@ export default function RoomClient() {
     <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 items-start gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <div className="flex min-w-0 flex-col gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0 max-w-full">
           <Link href="/" className="text-sm text-zinc-500 hover:underline" onNavigate={(event) => {
             if (me?.isHost && !waiting && !room.finalized) {
               event.preventDefault();
@@ -294,7 +294,7 @@ export default function RoomClient() {
           }}>
             EstimationX
           </Link>
-          <h1 className="text-2xl font-bold">
+          <h1 className="text-2xl font-bold [overflow-wrap:anywhere]">
             {room.roomName || <>Room <span className="font-mono">{room.id}</span></>}{" "}
             <span className="text-base font-normal text-zinc-500">· Round {room.round}</span>
           </h1>
