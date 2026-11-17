@@ -40,7 +40,10 @@ export default function Home() {
   function joinRoom(event: React.FormEvent) {
     event.preventDefault();
     const id = code.trim().replace(/\/+$/, "").split("/").pop()?.toLowerCase();
-    if (id) router.push(`/room/${id}`);
+    if (id) {
+      if (name.trim()) localStorage.setItem(NAME_KEY, name.trim());
+      router.push(`/room/${id}`);
+    }
   }
 
   return (

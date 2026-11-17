@@ -10,6 +10,8 @@ A simple planning poker app built with Next.js and deployed on Vercel.
 - When voting ends, the app shows the **average** and the **closest Fibonacci card**. Ties round up.
 - Anyone can still change their vote after the reveal, and the results update live for everyone.
 - The host can click **Reset for next round** to clear votes and return to waiting for **Start voting**.
+- Your chosen display name is remembered in this browser for later visits and rooms.
+- The host can optionally name a vote (for example, `FS-1234`). The right-hand **History** panel shows the reveal date/time, vote name, closest Fibonacci score, and average. During discussion the current history result updates with edited votes; resetting preserves the final result and clears the name for the next vote. History is shared with everyone and persists with the room for its 24-hour lifetime.
 - If the host goes inactive, any participant can end voting or reset. A participant becomes inactive after about 60 seconds without a heartbeat.
 
 ## How it works

@@ -205,7 +205,8 @@ export default function RoomClient() {
   const maxCount = Math.max(1, ...(room.summary?.distribution.map((d) => d.count) ?? []));
 
   return (
-    <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 p-4 sm:p-6">
+    <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 items-start gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="flex min-w-0 flex-col gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link href="/" className="text-sm text-zinc-500 hover:underline">
@@ -225,6 +226,14 @@ export default function RoomClient() {
           </button>
         </div>
       </header>
+
+      <section className="panel">
+        <h2 className="text-lg font-semibold">{room.voteName || `Vote ${room.round}`}</h2>
+        {me?.canManage && (
+          <VoteNameEditor key={`${room.round}:${room.voteName}`} initialName={room.voteName}
+            onSave={(name) => act({ action: "name", name })} />
+        )}
+      </section>
 
       <section className="panel flex flex-wrap items-center justify-between gap-3">
         <p className="font-medium" data-testid="status">
@@ -325,7 +334,51 @@ export default function RoomClient() {
           ))}
         </div>
       </section>
+      </div>
+      <aside className="panel min-w-0 lg:sticky lg:top-6" aria-label="Vote history">
+        <h2 className="mb-4 text-lg font-semibold">History</h2>
+        {room.history.length === 0 ? (
+          <p className="text-sm text-zinc-500">Revealed votes will appear here.</p>
+        ) : (
+          <ol className="flex flex-col gap-4">
+            {room.history.map((entry) => (
+              <li key={entry.round} className="border-b border-zinc-200 pb-3 last:border-0 dark:border-zinc-800">
+                <time dateTime={new Date(entry.timestamp).toISOString()} className="text-xs text-zinc-500">
+                  {new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(entry.timestamp)}
+                </time>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <span className="min-w-0 break-words font-medium">{entry.name || `Vote ${entry.round}`}</span>
+                  <span className="font-mono text-lg font-bold text-indigo-600 dark:text-indigo-400"
+                    aria-label={`Score: ${entry.score ?? "none"}`}>
+                    {entry.score ?? "—"}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-500">
+                  Round {entry.round} · Average: {entry.average === null ? "—" : formatAverage(entry.average)}
+                </p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </aside>
     </main>
+  );
+}
+
+function VoteNameEditor({ initialName, onSave }: { initialName: string; onSave: (name: string) => Promise<void> }) {
+  const [name, setName] = useState(initialName);
+  return (
+    <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={(event) => {
+      event.preventDefault();
+      onSave(name);
+    }}>
+      <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+        Vote name (optional)
+        <input className="input w-full" placeholder="e.g. FS-1234" maxLength={100}
+          value={name} onChange={(event) => setName(event.target.value)} />
+      </label>
+      <button className="btn-secondary" disabled={name === initialName}>Save vote name</button>
+    </form>
   );
 }
 

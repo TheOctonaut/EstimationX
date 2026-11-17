@@ -23,6 +23,9 @@ interface Room {
   round: number;
   hostId: string;
   voteEndsAt: number | null;
+  voteName: string;
+  revealedAt: number | null;
+  history: VoteHistoryEntry[];
   participants: Map<string, StoredParticipant>;
   votes: Map<string, string>;
 }
@@ -32,12 +35,22 @@ export interface Credentials {
   token: string;
 }
 
+export interface VoteHistoryEntry {
+  round: number;
+  timestamp: number;
+  name: string;
+  score: number | null;
+  average: number | null;
+}
+
 export interface PublicRoom {
   id: string;
   phase: Phase;
   round: number;
   hostId: string;
   voteEndsAt: number | null;
+  voteName: string;
+  history: VoteHistoryEntry[];
   participants: { id: string; name: string; active: boolean; hasVoted: boolean; vote: string | null }[];
   summary: Summary | null;
   me: { id: string; name: string; vote: string | null; isHost: boolean; canManage: boolean } | null;
@@ -81,9 +94,11 @@ async function load(roomId: string): Promise<Room> {
 
   const participants = new Map<string, StoredParticipant>();
   const votes = new Map<string, string>();
+  const history: VoteHistoryEntry[] = [];
   for (const [field, value] of Object.entries(fields)) {
     if (field.startsWith("p:")) participants.set(field.slice(2), JSON.parse(value));
     else if (field.startsWith("v:")) votes.set(field.slice(2), value);
+    else if (field.startsWith("h:")) history.push(JSON.parse(value));
   }
   return {
     id: roomId,
@@ -91,6 +106,9 @@ async function load(roomId: string): Promise<Room> {
     round: Number(fields.round) || 1,
     hostId: fields.host,
     voteEndsAt: fields.voteEndsAt ? Number(fields.voteEndsAt) : null,
+    voteName: fields.voteName ?? "",
+    revealedAt: fields.revealedAt ? Number(fields.revealedAt) : null,
+    history,
     participants,
     votes,
   };
@@ -121,6 +139,18 @@ function canManage(room: Room, participantId: string) {
   return participantId === room.hostId || !host || !isActive(host);
 }
 
+function currentHistoryEntry(room: Room): VoteHistoryEntry | null {
+  if (room.phase !== "revealed" || room.revealedAt === null) return null;
+  const summary = summarize([...room.votes.values()]);
+  return {
+    round: room.round,
+    timestamp: room.revealedAt,
+    name: room.voteName,
+    score: summary.nearest,
+    average: summary.average,
+  };
+}
+
 function toPublic(room: Room, meId: string | null): PublicRoom {
   const now = Date.now();
   const revealed = room.phase === "revealed";
@@ -134,12 +164,18 @@ function toPublic(room: Room, meId: string | null): PublicRoom {
       vote: revealed ? (room.votes.get(id) ?? null) : null,
     }));
   const me = meId ? room.participants.get(meId) : undefined;
+  const currentEntry = currentHistoryEntry(room);
   return {
     id: room.id,
     phase: room.phase,
     round: room.round,
     hostId: room.hostId,
     voteEndsAt: room.voteEndsAt,
+    voteName: room.voteName,
+    history: [
+      ...room.history.filter((entry) => entry.round !== currentEntry?.round),
+      ...(currentEntry ? [currentEntry] : []),
+    ].sort((a, b) => b.round - a.round),
     participants,
     summary: revealed ? summarize([...room.votes.values()]) : null,
     me:
@@ -229,7 +265,8 @@ export async function vote(roomId: string, creds: Partial<Credentials> | null, v
   if (room.phase === "voting") {
     const active = [...room.participants.entries()].filter(([, p]) => isActive(p));
     if (active.length > 0 && active.every(([pid]) => room.votes.has(pid))) {
-      await save(roomId, { phase: "revealed" });
+      room.revealedAt = Date.now();
+      await save(roomId, { phase: "revealed", revealedAt: String(room.revealedAt) });
       room.phase = "revealed";
     }
   }
@@ -249,12 +286,25 @@ export async function startVoting(roomId: string, creds: Partial<Credentials> | 
   return toPublic({ ...room, phase: "voting", voteEndsAt }, id);
 }
 
+export async function nameVote(roomId: string, creds: Partial<Credentials> | null, name: unknown) {
+  const room = await load(roomId);
+  const id = requireParticipant(room, creds);
+  if (!canManage(room, id)) throw new RoomError("Only the host can name the vote", 403);
+  if (typeof name !== "string" || name.length > 100) {
+    throw new RoomError("Vote name must be at most 100 characters", 400);
+  }
+  room.voteName = name.trim().replace(/\s+/g, " ");
+  await save(roomId, { voteName: room.voteName });
+  return toPublic(room, id);
+}
+
 export async function reveal(roomId: string, creds: Partial<Credentials> | null) {
   const room = await load(roomId);
   const id = requireParticipant(room, creds);
   if (!canManage(room, id)) throw new RoomError("Only the host can end voting", 403);
   if (room.phase === "waiting") throw new RoomError("Voting has not started yet", 409);
-  await save(roomId, { phase: "revealed" });
+  room.revealedAt ??= Date.now();
+  await save(roomId, { phase: "revealed", revealedAt: String(room.revealedAt) });
   room.phase = "revealed";
   return toPublic(room, id);
 }
@@ -263,9 +313,13 @@ export async function reset(roomId: string, creds: Partial<Credentials> | null) 
   const room = await load(roomId);
   const id = requireParticipant(room, creds);
   if (!canManage(room, id)) throw new RoomError("Only the host can reset the round", 403);
+  const entry = currentHistoryEntry(room);
+  if (entry) await save(roomId, { [`h:${room.round}`]: JSON.stringify(entry) });
   await getStore().remove(key(roomId), [...room.votes.keys()].map((pid) => `v:${pid}`));
   const host = room.participants.get(room.hostId);
-  const fields: Record<string, string> = { phase: "waiting", round: String(room.round + 1), voteEndsAt: "" };
+  const fields: Record<string, string> = {
+    phase: "waiting", round: String(room.round + 1), voteEndsAt: "", voteName: "", revealedAt: "",
+  };
   if (!host || !isActive(host)) fields.host = id;
   await save(roomId, fields);
   return getRoom(roomId, creds);

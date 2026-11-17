@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRoom, getRoom, joinRoom, reset, reveal, startVoting, vote } from "./rooms.ts";
+import { createRoom, getRoom, joinRoom, nameVote, reset, reveal, startVoting, vote } from "./rooms.ts";
 
 test("rounds wait for the host, use a shared 45-second default, and reset the timer", async () => {
   const host = await createRoom("Host");
@@ -50,4 +50,41 @@ test("timer expiry is advisory and does not prevent votes or manual reveal", asy
   assert.equal(room.phase, "revealed");
   room = await vote(host.roomId, guest, "13", 1);
   assert.equal(room.summary?.average, 13);
+});
+
+test("named vote history updates during discussion and persists final scores across rounds", async () => {
+  const host = await createRoom("Host");
+  const guest = await joinRoom(host.roomId, "Guest", null);
+  await assert.rejects(nameVote(host.roomId, guest, "FS-1234"), /Only the host/);
+  await assert.rejects(nameVote(host.roomId, host, "x".repeat(101)), /100 characters/);
+  await assert.rejects(nameVote(host.roomId, host, null), /100 characters/);
+  await nameVote(host.roomId, host, "  FS-1234  ");
+  assert.equal((await getRoom(host.roomId, guest)).voteName, "FS-1234");
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "5", 1);
+  assert.deepEqual((await getRoom(host.roomId, guest)).history, []);
+  let room = await vote(host.roomId, guest, "8", 1);
+  const timestamp = room.history[0].timestamp;
+  assert.ok(timestamp > 0);
+  assert.deepEqual(room.history[0], { round: 1, timestamp, name: "FS-1234", score: 8, average: 6.5 });
+  room = await vote(host.roomId, guest, "21", 1);
+  assert.equal(room.history[0].score, 13);
+  assert.equal(room.history[0].average, 13);
+  assert.equal(room.history[0].timestamp, timestamp);
+  await reveal(host.roomId, host);
+  assert.equal((await getRoom(host.roomId, host)).history[0].timestamp, timestamp);
+  room = await reset(host.roomId, host);
+  assert.equal(room.voteName, "");
+  assert.equal(room.history[0].name, "FS-1234");
+  assert.equal(room.history[0].score, 13);
+  await startVoting(host.roomId, host);
+  room = await reveal(host.roomId, host);
+  assert.equal(room.history[0].round, 2);
+  assert.equal(room.history[0].name, "");
+  assert.equal(room.history[0].score, null);
+  assert.equal(room.history[1].score, 13);
+  await reset(host.roomId, host);
+  room = await getRoom(host.roomId, guest);
+  assert.equal(room.history.length, 2);
+  assert.equal(room.history[1].timestamp, timestamp);
 });
