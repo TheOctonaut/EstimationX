@@ -21,8 +21,14 @@ export default function RoomClient() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [duration, setDuration] = useState("45");
+  const [admonished, setAdmonished] = useState(false);
+  const admonishmentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const creds = useRef<Credentials | null>(null);
   const pendingVote = useRef(false);
+
+  useEffect(() => () => {
+    if (admonishmentTimer.current) clearTimeout(admonishmentTimer.current);
+  }, []);
 
   const request = useCallback(
     async (body?: object) => {
@@ -121,6 +127,12 @@ export default function RoomClient() {
 
   async function castVote(value: string) {
     if (!room?.me) return;
+    if (room.phase === "waiting") {
+      setAdmonished(true);
+      if (admonishmentTimer.current) clearTimeout(admonishmentTimer.current);
+      admonishmentTimer.current = setTimeout(() => setAdmonished(false), 1800);
+      return;
+    }
     const next = room.me.vote === value ? null : value;
     setRoom({ ...room, me: { ...room.me, vote: next } });
     pendingVote.current = true;
@@ -282,7 +294,7 @@ export default function RoomClient() {
           <div className="flex flex-col gap-1">
             {room.summary.distribution.map((d) => (
               <div key={d.value} className="flex items-center gap-2 text-sm">
-                <span className="w-8 text-right font-mono">{d.value}</span>
+                <span className="flex w-8 justify-end font-mono"><CardFace value={d.value} /></span>
                 <div className="h-4 rounded bg-indigo-500" style={{ width: `${(d.count / maxCount) * 100}%`, minWidth: 8 }} />
                 <span className="text-zinc-500">{d.count}</span>
               </div>
@@ -303,7 +315,7 @@ export default function RoomClient() {
                 p.hasVoted ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950" : "border-dashed border-zinc-300 dark:border-zinc-700"
               }`}
             >
-              {revealed ? (p.vote ?? "–") : p.hasVoted ? "✓" : ""}
+              {revealed ? <CardFace value={p.vote ?? "–"} /> : p.hasVoted ? "✓" : ""}
             </div>
             <span className="max-w-full truncate text-sm" title={p.name}>
               {p.id === room.hostId && "👑 "}
@@ -314,25 +326,28 @@ export default function RoomClient() {
         ))}
       </section>
 
-      <section className="mt-auto">
+      <section className="mt-auto text-center" aria-label="Voting cards">
         <p className="mb-2 text-sm text-zinc-500">{waiting ? "Cards unlock when voting starts." : me?.vote ? "Your vote — tap again to clear" : "Pick a card"}</p>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-center gap-2">
           {DECK.map((card) => (
             <button
               key={card}
-              disabled={waiting}
+              aria-disabled={waiting}
               onClick={() => castVote(card)}
               aria-pressed={me?.vote === card}
-              className={`h-20 w-14 rounded-xl border-2 text-xl font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`flex h-20 w-14 items-center justify-center rounded-xl border-2 text-xl font-bold transition aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
                 me?.vote === card
                   ? "-translate-y-2 border-indigo-600 bg-indigo-600 text-white"
-                  : "border-zinc-300 hover:-translate-y-1 hover:border-indigo-400 dark:border-zinc-700"
+                  : `border-zinc-300 dark:border-zinc-700 ${waiting ? "" : "hover:-translate-y-1 hover:border-indigo-400"}`
               }`}
             >
-              {card}
+              <CardFace value={card} />
             </button>
           ))}
         </div>
+        <p role="status" className="mt-2 min-h-5 text-xs text-zinc-500">
+          {waiting && admonished ? "Stop that." : ""}
+        </p>
       </section>
       </div>
       <aside className="panel min-w-0 lg:sticky lg:top-6" aria-label="Vote history">
@@ -362,6 +377,17 @@ export default function RoomClient() {
         )}
       </aside>
     </main>
+  );
+}
+
+function CardFace({ value }: { value: string }) {
+  if (value !== "☕") return value;
+  return (
+    <svg viewBox="0 0 32 40" className="h-8 w-6" role="img" aria-label="Pint of Irish stout">
+      <path d="M5 8h22l-3 28H8Z" fill="#211814" stroke="#a1a1aa" strokeWidth="1.5" />
+      <path d="M5 8c0-3 3-5 6-4 2-3 7-3 9 0 4-1 7 1 7 4v5H5Z" fill="#f5e6ca" stroke="#a1a1aa" strokeWidth="1" />
+      <path d="m9 17 1.5 15" stroke="#fff" strokeOpacity=".2" strokeWidth="1.5" />
+    </svg>
   );
 }
 
