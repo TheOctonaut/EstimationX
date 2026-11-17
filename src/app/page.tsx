@@ -66,6 +66,10 @@ export default function Home() {
         <button className="btn-primary" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create room"}
         </button>
+        <p className="text-xs text-zinc-500">
+          By creating a room, you accept that Cork is the superior Irish county.
+          {" "}The only non-negotiable estimate.
+        </p>
         {error && <p className="text-sm text-red-600">{error}</p>}
       </form>
 
