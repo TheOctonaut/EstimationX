@@ -38,3 +38,19 @@ test("malformed Redis hash responses fail explicitly", async (t) => {
     t.mock.restoreAll();
   }
 });
+
+test("Redis set-if-absent reports whether an immutable round snapshot was inserted", async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => Response.json([
+    { result: requests++ === 0 ? 1 : 0 }, { result: 1 },
+  ]));
+  const store = new RedisStore(new Redis({
+    url: "https://redis.example.com",
+    token: "test-token",
+    automaticDeserialization: false,
+    enableAutoPipelining: false,
+    responseEncoding: false,
+  }));
+  assert.equal(await store.setIfAbsent("room:example", "h:1", "first", 60), true);
+  assert.equal(await store.setIfAbsent("room:example", "h:1", "second", 60), false);
+});

@@ -5,6 +5,7 @@ export interface HashStore {
   getAll(key: string): Promise<Record<string, string> | null>;
   set(key: string, fields: Record<string, string>, ttlSeconds: number): Promise<void>;
   remove(key: string, fields: string[]): Promise<void>;
+  setIfAbsent(key: string, field: string, value: string, ttlSeconds: number): Promise<boolean>;
 }
 
 export class RedisStore implements HashStore {
@@ -39,6 +40,11 @@ export class RedisStore implements HashStore {
   async remove(key: string, fields: string[]) {
     if (fields.length) await this.redis.hdel(key, ...fields);
   }
+
+  async setIfAbsent(key: string, field: string, value: string, ttlSeconds: number) {
+    const [inserted] = await this.redis.pipeline().hsetnx(key, field, value).expire(key, ttlSeconds).exec<[number, number]>();
+    return inserted === 1;
+  }
 }
 
 class MemoryStore implements HashStore {
@@ -51,13 +57,26 @@ class MemoryStore implements HashStore {
   }
 
   async set(key: string, fields: Record<string, string>, ttlSeconds: number) {
-    const existing = (await this.getAll(key)) ?? {};
+    const entry = this.data.get(key);
+    const existing = entry && entry.expiresAt >= Date.now() ? entry.fields : {};
     this.data.set(key, { fields: { ...existing, ...fields }, expiresAt: Date.now() + ttlSeconds * 1000 });
   }
 
   async remove(key: string, fields: string[]) {
     const entry = this.data.get(key);
     if (entry) for (const field of fields) delete entry.fields[field];
+  }
+
+  async setIfAbsent(key: string, field: string, value: string, ttlSeconds: number) {
+    let entry = this.data.get(key);
+    if (!entry || entry.expiresAt < Date.now()) {
+      entry = { fields: {}, expiresAt: Date.now() + ttlSeconds * 1000 };
+      this.data.set(key, entry);
+    }
+    if (Object.hasOwn(entry.fields, field)) return false;
+    entry.fields[field] = value;
+    entry.expiresAt = Date.now() + ttlSeconds * 1000;
+    return true;
   }
 }
 

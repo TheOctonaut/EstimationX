@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authHeaders, clearCredentials, loadCredentials, NAME_KEY, saveCredentials } from "@/lib/client";
 import type { Credentials, PublicRoom } from "@/lib/rooms";
@@ -15,6 +15,7 @@ type Status = "loading" | "needs-name" | "joined" | "not-found" | "left";
 
 export default function RoomClient() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [status, setStatus] = useState<Status>("loading");
   const [room, setRoom] = useState<PublicRoom | null>(null);
   const [name, setName] = useState("");
@@ -25,6 +26,34 @@ export default function RoomClient() {
   const admonishmentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const creds = useRef<Credentials | null>(null);
   const pendingVote = useRef(false);
+  const latestRoom = useRef<PublicRoom | null>(null);
+
+  useEffect(() => {
+    latestRoom.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    if (status !== "joined") return;
+    const finalizeOnExit = () => {
+      const current = latestRoom.current;
+      if (!current?.me?.isHost || current.phase === "waiting" || current.finalized || !creds.current) return;
+      const body = JSON.stringify({ action: "finalize", round: current.round, ...creds.current });
+      if (!navigator.sendBeacon(`/api/rooms/${id}`, new Blob([body], { type: "application/json" }))) {
+        fetch(`/api/rooms/${id}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true,
+        }).then((response) => {
+          if (!response.ok) console.warn("Could not finalise the round on exit", response.status);
+        }).catch((error: unknown) => console.warn("Could not finalise the round on exit", error));
+      }
+    };
+    window.addEventListener("pagehide", finalizeOnExit);
+    window.addEventListener("beforeunload", finalizeOnExit);
+    return () => {
+      window.removeEventListener("pagehide", finalizeOnExit);
+      window.removeEventListener("beforeunload", finalizeOnExit);
+      finalizeOnExit();
+    };
+  }, [id, status]);
 
   useEffect(() => () => {
     if (admonishmentTimer.current) clearTimeout(admonishmentTimer.current);
@@ -133,6 +162,7 @@ export default function RoomClient() {
       admonishmentTimer.current = setTimeout(() => setAdmonished(false), 1800);
       return;
     }
+    if (room.finalized) return;
     const next = room.me.vote === value ? null : value;
     setRoom({ ...room, me: { ...room.me, vote: next } });
     pendingVote.current = true;
@@ -141,10 +171,24 @@ export default function RoomClient() {
   }
 
   async function leaveRoom() {
-    await request({ action: "leave" }).catch(() => {});
-    clearCredentials(id);
-    creds.current = null;
-    setStatus("left");
+    try {
+      await request({ action: "leave" });
+      clearCredentials(id);
+      creds.current = null;
+      setStatus("left");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function finalizeAndGoHome() {
+    if (!room) return;
+    try {
+      setRoom(await request({ action: "finalize", round: room.round }));
+      router.push("/");
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   async function copyLink() {
@@ -221,7 +265,12 @@ export default function RoomClient() {
       <div className="flex min-w-0 flex-col gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link href="/" className="text-sm text-zinc-500 hover:underline">
+          <Link href="/" className="text-sm text-zinc-500 hover:underline" onNavigate={(event) => {
+            if (me?.isHost && !waiting && !room.finalized) {
+              event.preventDefault();
+              finalizeAndGoHome();
+            }
+          }}>
             EstimationX
           </Link>
           <h1 className="text-2xl font-bold">
@@ -241,7 +290,7 @@ export default function RoomClient() {
 
       <section className="panel">
         <h2 className="text-lg font-semibold">{room.voteName || `Vote ${room.round}`}</h2>
-        {me?.canManage && (
+        {me?.canManage && !room.finalized && (
           <VoteNameEditor key={`${room.round}:${room.voteName}`} initialName={room.voteName}
             onSave={(name) => act({ action: "name", name })} />
         )}
@@ -249,7 +298,9 @@ export default function RoomClient() {
 
       <section className="panel flex flex-wrap items-center justify-between gap-3">
         <p className="font-medium" data-testid="status">
-          {revealed
+          {room.finalized
+            ? "Round finalised — points awarded. Reset for the next round."
+            : revealed
             ? "Votes revealed — you can still change your vote while you discuss."
             : waiting ? "Waiting for the host to start voting." : `${votedCount} of ${active.length} voted`}
         </p>
@@ -273,14 +324,14 @@ export default function RoomClient() {
                 End voting &amp; reveal
               </button>
             )}
-            <button className={revealed ? "btn-primary" : "btn-secondary"} onClick={() => act({ action: "reset" })}>
+            <button className={revealed ? "btn-primary" : "btn-secondary"} onClick={() => act({ action: "reset", round: room.round })}>
               Reset for next round
             </button>
           </div>
         )}
       </section>
 
-      {room.phase === "voting" && room.voteEndsAt !== null && (
+      {room.phase === "voting" && !room.finalized && room.voteEndsAt !== null && (
         <VotingTimer key={room.voteEndsAt} endsAt={room.voteEndsAt} isHost={me?.isHost ?? false}
           onReveal={() => act({ action: "reveal" })} />
       )}
@@ -327,18 +378,18 @@ export default function RoomClient() {
       </section>
 
       <section className="mt-auto text-center" aria-label="Voting cards">
-        <p className="mb-2 text-sm text-zinc-500">{waiting ? "Cards unlock when voting starts." : me?.vote ? "Your vote — tap again to clear" : "Pick a card"}</p>
+        <p className="mb-2 text-sm text-zinc-500">{room.finalized ? "This round is finalised." : waiting ? "Cards unlock when voting starts." : me?.vote ? "Your vote — tap again to clear" : "Pick a card"}</p>
         <div className="flex flex-wrap justify-center gap-2">
           {DECK.map((card) => (
             <button
               key={card}
-              aria-disabled={waiting}
+              aria-disabled={waiting || room.finalized}
               onClick={() => castVote(card)}
               aria-pressed={me?.vote === card}
               className={`flex h-20 w-14 items-center justify-center rounded-xl border-2 text-xl font-bold transition aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
                 me?.vote === card
                   ? "-translate-y-2 border-indigo-600 bg-indigo-600 text-white"
-                  : `border-zinc-300 dark:border-zinc-700 ${waiting ? "" : "hover:-translate-y-1 hover:border-indigo-400"}`
+                  : `border-zinc-300 dark:border-zinc-700 ${waiting || room.finalized ? "" : "hover:-translate-y-1 hover:border-indigo-400"}`
               }`}
             >
               <CardFace value={card} />
@@ -350,7 +401,8 @@ export default function RoomClient() {
         </p>
       </section>
       </div>
-      <aside className="panel min-w-0 lg:sticky lg:top-6" aria-label="Vote history">
+      <aside className="flex min-w-0 flex-col gap-6 lg:sticky lg:top-6" aria-label="Room sidebar">
+      <section className="panel" aria-label="Vote history">
         <h2 className="mb-4 text-lg font-semibold">History</h2>
         {room.history.length === 0 ? (
           <p className="text-sm text-zinc-500">Revealed votes will appear here.</p>
@@ -375,6 +427,26 @@ export default function RoomClient() {
             ))}
           </ol>
         )}
+      </section>
+      <section className="panel" aria-label="Leaderboard">
+        <h2 className="mb-2 text-lg font-semibold">Leaderboard</h2>
+        <p className="mb-4 text-xs text-zinc-500">
+          One point if your first pre-reveal vote matches the final Fibonacci score.
+          Points are awarded on reset or when the host leaves.
+        </p>
+        <ol className="flex flex-col gap-3">
+          {room.leaderboard.map((player) => (
+            <li key={player.participantId} className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate" title={player.name}>
+                {player.name}{player.participantId === me?.id ? " (you)" : ""}
+              </span>
+              <span className="shrink-0 font-mono font-semibold">
+                {player.points} {player.points === 1 ? "point" : "points"}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </section>
       </aside>
     </main>
   );

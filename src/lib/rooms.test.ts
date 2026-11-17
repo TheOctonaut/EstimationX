@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRoom, getRoom, joinRoom, nameVote, reset, reveal, startVoting, vote } from "./rooms.ts";
+import { createRoom, finalizeRound, getRoom, joinRoom, leave, nameVote, reset, reveal, startVoting, vote } from "./rooms.ts";
 
 test("rounds wait for the host, use a shared 45-second default, and reset the timer", async () => {
   const host = await createRoom("Host");
@@ -87,4 +87,112 @@ test("named vote history updates during discussion and persists final scores acr
   room = await getRoom(host.roomId, guest);
   assert.equal(room.history.length, 2);
   assert.equal(room.history[1].timestamp, timestamp);
+});
+
+test("points compare the first pre-reveal vote with the final discussion result, only once", async () => {
+  const host = await createRoom("Host");
+  const guest = await joinRoom(host.roomId, "Guest", null);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "3", 1);
+  await vote(host.roomId, host, "5", 1);
+  await vote(host.roomId, guest, "8", 1);
+  const late = await joinRoom(host.roomId, "Late voter", null);
+  await vote(host.roomId, guest, "3", 1);
+  await vote(host.roomId, late, "3", 1);
+  let room = await getRoom(host.roomId, host);
+  assert.equal(room.summary?.nearest, 3);
+  assert.ok(room.leaderboard.every((p) => p.points === 0));
+  await assert.rejects(finalizeRound(host.roomId, guest, 1), /Only the host/);
+  await Promise.all([
+    finalizeRound(host.roomId, host, 1),
+    finalizeRound(host.roomId, host, 1),
+  ]);
+  room = await getRoom(host.roomId, host);
+  assert.equal(room.finalized, true);
+  assert.equal(room.leaderboard.find((p) => p.participantId === host.participantId)?.points, 1);
+  assert.equal(room.leaderboard.find((p) => p.participantId === guest.participantId)?.points, 0);
+  assert.equal(room.leaderboard.find((p) => p.participantId === late.participantId)?.points, 0);
+  await assert.rejects(vote(host.roomId, guest, "3", 1), /finalised/);
+  room = await reset(host.roomId, host, 1);
+  assert.equal(room.leaderboard[0].points, 1);
+  assert.equal(room.finalized, false);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "3", 2);
+  await reveal(host.roomId, host);
+  await assert.rejects(finalizeRound(host.roomId, host, 1), /round has ended/);
+  await assert.rejects(reset(host.roomId, host, 1), /round has ended/);
+  room = await reset(host.roomId, host, 2);
+  assert.equal(room.leaderboard[0].points, 2);
+});
+
+test("zero can earn points but question, stout, and no numeric result cannot", async () => {
+  const host = await createRoom("Zero");
+  const guest = await joinRoom(host.roomId, "Question", null);
+  const third = await joinRoom(host.roomId, "Stout", null);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "0", 1);
+  await vote(host.roomId, guest, "?", 1);
+  await vote(host.roomId, third, "☕", 1);
+  let room = await reset(host.roomId, host, 1);
+  assert.equal(room.leaderboard[0].participantId, host.participantId);
+  assert.equal(room.leaderboard[0].points, 1);
+  assert.equal(room.leaderboard.filter((p) => p.points === 0).length, 2);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "?", 2);
+  await vote(host.roomId, guest, "☕", 2);
+  room = await reset(host.roomId, host, 2);
+  assert.equal(room.history[0].score, null);
+  assert.equal(room.leaderboard[0].points, 1);
+});
+
+test("host departure finalises before removing votes and retains the departed player's points", async () => {
+  const host = await createRoom("Departing host");
+  const guest = await joinRoom(host.roomId, "Guest", null);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "5", 1);
+  await vote(host.roomId, guest, "5", 1);
+  await leave(host.roomId, host);
+  let room = await getRoom(host.roomId, guest);
+  assert.equal(room.hostId, guest.participantId);
+  assert.equal(room.finalized, true);
+  assert.equal(room.summary?.totalVotes, 2);
+  assert.equal(room.leaderboard.length, 2);
+  assert.ok(room.leaderboard.every((p) => p.points === 1));
+  room = await reset(host.roomId, guest, 1);
+  assert.ok(room.leaderboard.every((p) => p.points === 1));
+});
+
+test("finalising while voting records the current result and duplicate resets cannot award twice", async () => {
+  const host = await createRoom("Host");
+  await joinRoom(host.roomId, "Not voted", null);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "5", 1);
+  let room = await finalizeRound(host.roomId, host, 1);
+  assert.equal(room.phase, "revealed");
+  assert.equal(room.summary?.nearest, 5);
+  assert.equal(room.leaderboard[0].points, 1);
+  await Promise.all([
+    reset(host.roomId, host, 1),
+    reset(host.roomId, host, 1),
+  ]);
+  room = await getRoom(host.roomId, host);
+  assert.equal(room.round, 2);
+  assert.equal(room.leaderboard[0].points, 1);
+});
+
+test("an exit finalisation racing a reset cannot reveal or award points for the next round", async () => {
+  const host = await createRoom("Host");
+  await joinRoom(host.roomId, "Guest", null);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "5", 1);
+  await Promise.all([
+    finalizeRound(host.roomId, host, 1),
+    reset(host.roomId, host, 1),
+  ]);
+  const room = await getRoom(host.roomId, host);
+  assert.equal(room.round, 2);
+  assert.equal(room.phase, "waiting");
+  assert.equal(room.finalized, false);
+  assert.equal(room.summary, null);
+  assert.equal(room.leaderboard[0].points, 1);
 });
