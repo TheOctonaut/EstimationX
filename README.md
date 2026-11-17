@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EstimationX
 
-## Getting Started
+A simple planning poker app built with Next.js and deployed on Vercel.
 
-First, run the development server:
+- Rooms for up to **20** active participants. Share the invite link to let people join.
+- Fibonacci deck: `0 1 2 3 5 8 13 21 34 55 89`, plus `?` and `☕`. These two don't count toward the average.
+- Voting ends automatically when every active participant has voted, or when the room host clicks **End voting & reveal**.
+- When voting ends, the app shows the **average** and the **closest Fibonacci card**. Ties round up.
+- Anyone can still change their vote after the reveal, and the results update live for everyone.
+- The host can click **Reset for next round** to start the next round.
+- If the host goes inactive, any participant can end voting or reset. A participant becomes inactive after about 60 seconds without a heartbeat.
+
+## How it works
+
+Room state lives in one Upstash Redis hash per room, so each poll costs a single Redis command. Clients poll every 2 seconds, or every 10 seconds when the tab is hidden. They also send a heartbeat every 20 seconds. Rooms expire 24 hours after their last change.
+
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Without Redis credentials, local development uses an in-memory store. To test against Redis, set `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`) in `.env.local`. You can run `vercel env pull` to fetch them.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm test       # scoring unit tests (node:test)
+npm run lint
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploying
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Import the repository into Vercel.
+2. In the project's **Storage** tab, add **Upstash for Redis** from the Marketplace on the free plan. This sets the `KV_REST_API_*` environment variables.
+3. Redeploy.
