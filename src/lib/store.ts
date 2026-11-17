@@ -7,12 +7,29 @@ export interface HashStore {
   remove(key: string, fields: string[]): Promise<void>;
 }
 
-class RedisStore implements HashStore {
-  constructor(private redis: Redis) {}
+export class RedisStore implements HashStore {
+  private redis: Redis;
+
+  constructor(redis: Redis) {
+    this.redis = redis;
+  }
 
   async getAll(key: string) {
-    const result = await this.redis.hgetall<Record<string, string>>(key);
-    return result && Object.keys(result).length ? result : null;
+    // Disabling SDK deserialization also disables HGETALL's array-to-object conversion.
+    const result: unknown = await this.redis.hgetall(key);
+    if (!Array.isArray(result) || result.length % 2 !== 0) {
+      throw new Error("Invalid Redis hash response");
+    }
+    const fields: Record<string, string> = {};
+    for (let i = 0; i < result.length; i += 2) {
+      const field = result[i];
+      const value = result[i + 1];
+      if (typeof field !== "string" || typeof value !== "string") {
+        throw new Error("Invalid Redis hash field or value");
+      }
+      fields[field] = value;
+    }
+    return result.length ? fields : null;
   }
 
   async set(key: string, fields: Record<string, string>, ttlSeconds: number) {

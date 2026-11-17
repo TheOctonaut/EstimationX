@@ -24,7 +24,7 @@ npm run dev
 Without Redis credentials, local development uses an in-memory store. To test against Redis, set `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`) in `.env.local`. You can run `vercel env pull` to fetch them.
 
 ```bash
-npm test       # scoring unit tests (node:test)
+npm test       # scoring and Redis adapter regression tests (node:test)
 npm run lint
 npm run build
 ```
