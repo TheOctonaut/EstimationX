@@ -19,6 +19,9 @@ export default function RoomClient() {
   const [status, setStatus] = useState<Status>("loading");
   const [room, setRoom] = useState<PublicRoom | null>(null);
   const [name, setName] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [duration, setDuration] = useState("45");
@@ -181,6 +184,24 @@ export default function RoomClient() {
     }
   }
 
+  async function renameSelf(event: React.FormEvent) {
+    event.preventDefault();
+    setRenameBusy(true);
+    setError(null);
+    try {
+      const next: PublicRoom = await request({ action: "rename", name: renameDraft });
+      if (!next.me) throw new Error("Could not update your name");
+      setRoom(next);
+      setName(next.me.name);
+      localStorage.setItem(NAME_KEY, next.me.name);
+      setRenaming(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRenameBusy(false);
+    }
+  }
+
   async function finalizeAndGoHome() {
     if (!room) return;
     try {
@@ -278,7 +299,13 @@ export default function RoomClient() {
             <span className="text-base font-normal text-zinc-500">· Round {room.round}</span>
           </h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-secondary" aria-expanded={renaming} aria-controls="rename-form" onClick={() => {
+            setRenameDraft(me?.name ?? name);
+            setRenaming(true);
+          }}>
+            Rename yourself
+          </button>
           <button className="btn-secondary" onClick={copyLink}>
             {copied ? "Copied!" : "Copy invite link"}
           </button>
@@ -287,6 +314,22 @@ export default function RoomClient() {
           </button>
         </div>
       </header>
+
+      {renaming && (
+        <form id="rename-form" className="panel flex flex-wrap items-end gap-3" onSubmit={renameSelf}>
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+            Your display name
+            <input className="input w-full" value={renameDraft} maxLength={30} autoFocus required
+              onChange={(event) => setRenameDraft(event.target.value)} />
+          </label>
+          <button className="btn-primary" disabled={renameBusy || !renameDraft.trim()}>
+            {renameBusy ? "Saving…" : "Save name"}
+          </button>
+          <button className="btn-secondary" type="button" disabled={renameBusy} onClick={() => setRenaming(false)}>
+            Cancel
+          </button>
+        </form>
+      )}
 
       <section className="panel">
         <h2 className="text-lg font-semibold">{room.voteName || `Vote ${room.round}`}</h2>

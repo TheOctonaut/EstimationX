@@ -294,6 +294,14 @@ export async function heartbeat(roomId: string, creds: Partial<Credentials> | nu
   await save(roomId, { [`p:${id}`]: JSON.stringify(participant) });
 }
 
+export async function renameParticipant(roomId: string, creds: Partial<Credentials> | null, name: unknown) {
+  const room = await load(roomId);
+  const id = requireParticipant(room, creds);
+  const participant = { ...room.participants.get(id)!, name: cleanName(name), lastSeen: Date.now() };
+  await save(roomId, { [`p:${id}`]: JSON.stringify(participant) });
+  return getRoom(roomId, creds);
+}
+
 export async function vote(roomId: string, creds: Partial<Credentials> | null, value: unknown, round: unknown) {
   let room = await load(roomId);
   const id = requireParticipant(room, creds);

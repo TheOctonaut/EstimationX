@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRoom, finalizeRound, getRoom, joinRoom, leave, nameVote, reset, reveal, startVoting, vote } from "./rooms.ts";
+import { createRoom, finalizeRound, getRoom, joinRoom, leave, nameVote, renameParticipant, reset, reveal, startVoting, vote } from "./rooms.ts";
 
 test("rounds wait for the host, use a shared 45-second default, and reset the timer", async () => {
   const host = await createRoom("Host");
@@ -195,4 +195,36 @@ test("an exit finalisation racing a reset cannot reveal or award points for the 
   assert.equal(room.finalized, false);
   assert.equal(room.summary, null);
   assert.equal(room.leaderboard[0].points, 1);
+});
+
+test("renaming preserves participant identity, votes, host privileges, and earned points", async () => {
+  const host = await createRoom("Host");
+  const guest = await joinRoom(host.roomId, "Guest", null);
+  await startVoting(host.roomId, host);
+  await vote(host.roomId, host, "5", 1);
+  let room = await renameParticipant(host.roomId, host, "  New   host  ");
+  assert.equal(room.me?.id, host.participantId);
+  assert.equal(room.me?.name, "New host");
+  assert.equal(room.me?.vote, "5");
+  assert.equal(room.me?.isHost, true);
+  assert.equal(room.phase, "voting");
+  assert.equal(room.participants.length, 2);
+  assert.equal((await getRoom(host.roomId, guest)).participants.find((p) => p.id === host.participantId)?.name, "New host");
+  await vote(host.roomId, guest, "5", 1);
+  await reset(host.roomId, host, 1);
+  room = await renameParticipant(host.roomId, guest, "New guest");
+  assert.equal(room.me?.id, guest.participantId);
+  assert.equal(room.leaderboard.find((p) => p.participantId === guest.participantId)?.name, "New guest");
+  assert.equal(room.leaderboard.find((p) => p.participantId === guest.participantId)?.points, 1);
+});
+
+test("renaming requires valid credentials and a non-empty name without adding a participant", async () => {
+  const host = await createRoom("Host");
+  await assert.rejects(renameParticipant(host.roomId, null, "Intruder"), /not in this room/);
+  await assert.rejects(renameParticipant(host.roomId, { participantId: host.participantId, token: "wrong" }, "Intruder"), /not in this room/);
+  await assert.rejects(renameParticipant(host.roomId, host, "   "), /Name is required/);
+  await assert.rejects(renameParticipant(host.roomId, host, null), /Name is required/);
+  const room = await getRoom(host.roomId, host);
+  assert.equal(room.participants.length, 1);
+  assert.equal(room.me?.name, "Host");
 });

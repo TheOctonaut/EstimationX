@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { finalizeRound, getRoom, heartbeat, joinRoom, leave, nameVote, reset, reveal, RoomError, startVoting, vote, type Credentials } from "@/lib/rooms";
+import { finalizeRound, getRoom, heartbeat, joinRoom, leave, nameVote, renameParticipant, reset, reveal, RoomError, startVoting, vote, type Credentials } from "@/lib/rooms";
 
 function credentialsFrom(request: NextRequest): Partial<Credentials> {
   return {
@@ -30,6 +30,8 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/rooms/[
   try {
     const body = await request.json().catch(() => ({}));
     switch (body.action) {
+      case "rename":
+        return Response.json(await renameParticipant(id, creds, body.name));
       case "finalize":
         return Response.json(await finalizeRound(id, {
           participantId: creds.participantId ?? (typeof body.participantId === "string" ? body.participantId : undefined),
