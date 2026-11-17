@@ -295,9 +295,10 @@ export default function RoomClient() {
             EstimationX
           </Link>
           <h1 className="text-2xl font-bold">
-            Room <span className="font-mono">{room.id}</span>{" "}
+            {room.roomName || <>Room <span className="font-mono">{room.id}</span></>}{" "}
             <span className="text-base font-normal text-zinc-500">· Round {room.round}</span>
           </h1>
+          {room.roomName && <p className="text-sm text-zinc-500">Room code: <span className="font-mono">{room.id}</span></p>}
         </div>
         <div className="flex flex-wrap gap-2">
           <button className="btn-secondary" aria-expanded={renaming} aria-controls="rename-form" onClick={() => {

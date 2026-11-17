@@ -19,6 +19,7 @@ interface StoredParticipant {
 
 interface Room {
   id: string;
+  details: RoomDetails;
   phase: Phase;
   round: number;
   hostId: string;
@@ -36,6 +37,12 @@ export interface Credentials {
   token: string;
 }
 
+export interface RoomDetails {
+  squad: string;
+  quarter: string;
+  sprintNumber: number | null;
+}
+
 export interface VoteHistoryEntry {
   round: number;
   timestamp: number;
@@ -48,6 +55,8 @@ export interface VoteHistoryEntry {
 
 export interface PublicRoom {
   id: string;
+  roomName: string;
+  details: RoomDetails;
   phase: Phase;
   round: number;
   hostId: string;
@@ -92,6 +101,14 @@ function cleanName(name: unknown) {
   return trimmed;
 }
 
+function cleanRoomText(value: unknown, label: string, maxLength: number) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new RoomError(`${label} must be text`, 400);
+  const cleaned = value.trim().replace(/\s+/g, " ");
+  if (cleaned.length > maxLength) throw new RoomError(`${label} must be at most ${maxLength} characters`, 400);
+  return cleaned;
+}
+
 async function load(roomId: string): Promise<Room> {
   if (!isValidRoomId(roomId)) throw new RoomError("Room not found", 404);
   const fields = await getStore().getAll(key(roomId));
@@ -111,6 +128,11 @@ async function load(roomId: string): Promise<Room> {
   const finalized = history.some((entry) => entry.round === round && entry.winners !== undefined);
   return {
     id: roomId,
+    details: {
+      squad: fields.squad ?? "",
+      quarter: fields.quarter ?? "",
+      sprintNumber: fields.sprintNumber ? Number(fields.sprintNumber) : null,
+    },
     phase: finalized ? "revealed" : fields.phase === "waiting" ? "waiting" : fields.phase === "revealed" ? "revealed" : "voting",
     round,
     hostId: fields.host,
@@ -212,6 +234,12 @@ function toPublic(room: Room, meId: string | null): PublicRoom {
   }
   return {
     id: room.id,
+    roomName: [
+      room.details.squad,
+      room.details.quarter,
+      room.details.sprintNumber === null ? "" : `Sprint ${room.details.sprintNumber}`,
+    ].filter(Boolean).join(" · "),
+    details: room.details,
     phase: room.phase,
     round: room.round,
     hostId: room.hostId,
@@ -246,12 +274,21 @@ function newParticipant(name: string) {
   return { id, token, participant };
 }
 
-export async function createRoom(name: unknown) {
+export async function createRoom(name: unknown, details: { squad?: unknown; quarter?: unknown; sprintNumber?: unknown } = {}) {
   const cleaned = cleanName(name);
+  const squad = cleanRoomText(details.squad, "Squad", 50);
+  const quarter = cleanRoomText(details.quarter, "Quarter", 30);
+  const sprintNumber = details.sprintNumber ?? null;
+  if (sprintNumber !== null && (typeof sprintNumber !== "number" || !Number.isSafeInteger(sprintNumber) || sprintNumber < 0)) {
+    throw new RoomError("Sprint Number must be a non-negative whole number", 400);
+  }
   const roomId = randomId(8);
   const { id, token, participant } = newParticipant(cleaned);
   await save(roomId, {
     phase: "waiting",
+    squad,
+    quarter,
+    sprintNumber: sprintNumber === null ? "" : String(sprintNumber),
     round: "1",
     host: id,
     createdAt: String(Date.now()),

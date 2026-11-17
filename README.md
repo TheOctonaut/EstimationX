@@ -3,6 +3,7 @@
 A simple planning poker app built with Next.js and deployed on Vercel.
 
 - Rooms for up to **20** active participants. Share the invite link to let people join.
+- When creating a room, optionally add **Squad**, **Quarter**, and **Sprint Number** to give it a shared name such as `Platform · Q4 2026 · Sprint 12`. Any fields may be left blank; the room code and invite link are unchanged.
 - Fibonacci deck: `0 1 2 3 5 8 13 21`, plus `?` and a pint of Irish stout for a break. These two don't count toward the average.
 - The host clicks **Start voting** to unlock the cards and start a shared countdown, defaulting to **45 seconds** (adjustable from 1 to 3600 seconds).
 - The deck is centred, including wrapped rows. Tapping a card before voting starts gives a quiet "Stop that." rather than casting a vote.

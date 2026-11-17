@@ -7,6 +7,9 @@ import { NAME_KEY, saveCredentials } from "@/lib/client";
 export default function Home() {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [squad, setSquad] = useState("");
+  const [quarter, setQuarter] = useState("");
+  const [sprintNumber, setSprintNumber] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +27,9 @@ export default function Home() {
       const res = await fetch("/api/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name, squad, quarter, sprintNumber: sprintNumber === "" ? null : Number(sprintNumber),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not create room");
@@ -64,6 +69,26 @@ export default function Home() {
           onChange={(e) => setName(e.target.value)}
           required
         />
+        <fieldset className="flex min-w-0 flex-col gap-3">
+          <legend className="mb-2 text-sm font-medium">Room name (optional)</legend>
+          <label className="flex flex-col gap-1 text-sm">
+            Squad
+            <input className="input w-full" placeholder="e.g. Platform" maxLength={50}
+              value={squad} onChange={(event) => setSquad(event.target.value)} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex min-w-0 flex-col gap-1 text-sm">
+              Quarter
+              <input className="input w-full" placeholder="e.g. Q4 2026" maxLength={30}
+                value={quarter} onChange={(event) => setQuarter(event.target.value)} />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1 text-sm">
+              Sprint Number
+              <input className="input w-full" type="number" min="0" step="1" placeholder="e.g. 12"
+                value={sprintNumber} onChange={(event) => setSprintNumber(event.target.value)} />
+            </label>
+          </div>
+        </fieldset>
         <button className="btn-primary" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create room"}
         </button>

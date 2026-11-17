@@ -228,3 +228,40 @@ test("renaming requires valid credentials and a non-empty name without adding a 
   assert.equal(room.participants.length, 1);
   assert.equal(room.me?.name, "Host");
 });
+
+test("optional room details form a shared name and persist across rounds", async () => {
+  const host = await createRoom("Host", { squad: "  Platform   team ", quarter: "Q4 2026", sprintNumber: 12 });
+  let room = await getRoom(host.roomId, null);
+  assert.equal(room.roomName, "Platform team · Q4 2026 · Sprint 12");
+  assert.deepEqual(room.details, { squad: "Platform team", quarter: "Q4 2026", sprintNumber: 12 });
+  const guest = await joinRoom(host.roomId, "Guest", null);
+  assert.equal((await getRoom(host.roomId, guest)).roomName, room.roomName);
+  room = await reset(host.roomId, host);
+  assert.equal(room.roomName, "Platform team · Q4 2026 · Sprint 12");
+  assert.equal(room.id, host.roomId);
+  assert.equal(room.round, 2);
+});
+
+test("room name fields can be omitted individually, including sprint zero", async () => {
+  const unnamed = await createRoom("Host");
+  const room = await getRoom(unnamed.roomId, unnamed);
+  assert.equal(room.roomName, "");
+  assert.deepEqual(room.details, { squad: "", quarter: "", sprintNumber: null });
+  for (const [details, expected] of [
+    [{ squad: "Squad A" }, "Squad A"],
+    [{ quarter: "Q1" }, "Q1"],
+    [{ sprintNumber: 0 }, "Sprint 0"],
+  ] as const) {
+    const host = await createRoom("Host", details);
+    assert.equal((await getRoom(host.roomId, host)).roomName, expected);
+  }
+});
+
+test("invalid room details are rejected explicitly", async () => {
+  for (const sprintNumber of [-1, 1.5, "12", Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(createRoom("Host", { sprintNumber }), /Sprint Number/);
+  }
+  await assert.rejects(createRoom("Host", { squad: 123 }), /Squad must be text/);
+  await assert.rejects(createRoom("Host", { squad: "a".repeat(51) }), /Squad must be at most 50/);
+  await assert.rejects(createRoom("Host", { quarter: "a".repeat(31) }), /Quarter must be at most 30/);
+});
